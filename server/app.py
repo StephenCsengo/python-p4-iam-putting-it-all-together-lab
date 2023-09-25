@@ -7,27 +7,100 @@ from sqlalchemy.exc import IntegrityError
 from config import app, db, api
 from models import User, Recipe
 
+
 class Signup(Resource):
-    pass
+    def post(self):
+        json = request.get_json()
+
+        username = json.get("username")
+        password = json.get("password")
+        image_url = json.get("image_url")
+        bio = json.get("bio")
+
+        new_user = User(username=username, image_url=image_url, bio=bio)
+        new_user.password_hash = password
+
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+            session["user_id"] = new_user.id
+
+            return new_user.to_dict(), 201
+
+        except IntegrityError:
+            return {"error": "422 Unprocessable Entity"}, 422
+
 
 class CheckSession(Resource):
-    pass
+    def get(self):
+        if session.get("user_id"):
+            user = User.query.filter(User.id == session["user_id"]).first()
+            return user.to_dict(), 200
+
+        return {"error": "401 Unauthorized"}, 401
+
 
 class Login(Resource):
-    pass
+    def post(self):
+        username = request.get_json()["username"]
+        password = request.get_json()["password"]
+        user = User.query.filter(User.username == username).first()
+
+        if user:
+            if user.authenticate(password):
+                session["user_id"] = user.id
+                return user.to_dict(), 200
+
+        return {"error": "401 Unauthorized"}, 401
+
 
 class Logout(Resource):
-    pass
+    def delete(self):
+        if session.get("user_id"):
+            session["user_id"] = None
+            return {}, 204
+
+        return {"error": "401 Unauthorized"}, 401
+
 
 class RecipeIndex(Resource):
-    pass
+    def get(self):
+        if session.get("user_id"):
+            user = User.query.filter(User.id == session["user_id"]).first()
 
-api.add_resource(Signup, '/signup', endpoint='signup')
-api.add_resource(CheckSession, '/check_session', endpoint='check_session')
-api.add_resource(Login, '/login', endpoint='login')
-api.add_resource(Logout, '/logout', endpoint='logout')
-api.add_resource(RecipeIndex, '/recipes', endpoint='recipes')
+            return [recipe.to_dict() for recipe in user.recipes], 200
+
+        return {"error": "401 Unauthorized"}, 401
+
+    def post(self):
+        if session.get("user_id"):
+            recipe_json = request.get_json()
+
+            title = recipe_json.get("title")
+            instructions = recipe_json.get("instructions")
+            minutes_to_complete = recipe_json.get("minutes_to_complete")
+
+            try:
+                new_recipe = Recipe(
+                    title=title,
+                    instructions=instructions,
+                    minutes_to_complete=minutes_to_complete,
+                    user_id=session["user_id"],
+                )
+                db.session.add(new_recipe)
+                db.session.commit()
+                return new_recipe.to_dict(), 201
+
+            except IntegrityError:
+                return {"error": "422 Unprocessable Entity"}, 422
 
 
-if __name__ == '__main__':
+api.add_resource(Signup, "/signup", endpoint="signup")
+api.add_resource(CheckSession, "/check_session", endpoint="check_session")
+api.add_resource(Login, "/login", endpoint="login")
+api.add_resource(Logout, "/logout", endpoint="logout")
+api.add_resource(RecipeIndex, "/recipes", endpoint="recipes")
+
+
+if __name__ == "__main__":
     app.run(port=5555, debug=True)
